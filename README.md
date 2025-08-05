@@ -77,6 +77,12 @@ export UNIMOL_WEIGHT_DIR=/path/to/your/weights/dir/
 - 2024-06-25: unimol_tools has been publish to pypi! Huggingface has been used to manage the pretrain models.
 - 2024-06-20: unimol_tools v0.1.0 released, we remove the dependency of Uni-Core. And we will publish to pypi soon.
 - 2024-03-20: unimol_tools documents is available at https://unimol-tools.readthedocs.io/en/latest/
+- 2025-07-17: Pretrain dataset generation now supports the original Uni-Mol multi-conformer style.
+- 2025-07-20: Pretrain preprocessing can now read CSV or SMI files; the SMILES column should be named `smi`.
+- 2025-07-21: Preprocessing accepts molecule dictionaries with `atoms`/`coordinates` and the trainer saves `checkpoint_last.ckpt` and `checkpoint_best.ckpt` during training.
+- 2025-07-22: Preprocessing now supports SDF molecule files.
+- 2025-07-23: Pretraining automatically resumes from `checkpoint_last.ckpt` and selects the best model using validation loss.
+- 2025-07-24: Validation and checkpoint saving run every `save_every_n_epoch` epochs instead of each epoch.
 
 ## Examples
 ### Molecule property prediction
