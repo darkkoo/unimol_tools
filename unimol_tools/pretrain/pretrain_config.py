@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from hydra.core.config_store import ConfigStore
+from omegaconf import DictConfig
 
 
 @dataclass
@@ -26,10 +27,14 @@ class DatasetConfig:
     random_token_prob: float = 0.1
     add_2d: bool = True
     num_conformers: int = 10
+    mask_token_prob: float = 0.15
+    drop_feat_prob: float = 1.0
+    use_2d_pos_prob: float = 0.5
 
 @dataclass
 class ModelConfig:
-    model_name: str = 'UniMol'
+    model_name: str = 'unimolv1'
+    model_size: str = '84m'
     encoder_layers: int = 15
     encoder_embed_dim: int = 512
     encoder_ffn_embed_dim: int = 2048
@@ -48,6 +53,13 @@ class ModelConfig:
     masked_dist_loss: float = 10
     x_norm_loss: float = 0.01
     delta_pair_repr_norm_loss: float = 0.01
+    pair_embed_dim: int = 64
+    pair_hidden_dim: int = 64
+    pair_dropout: float = 0.0
+    droppath_prob: float = 0.0
+    gaussian_std_width: float = 1.0
+    gaussian_mean_start: float = 0.0
+    gaussian_mean_stop: float = 9.0
 
 @dataclass
 class TrainingConfig:
@@ -77,7 +89,7 @@ class TrainingConfig:
     resume: Optional[str] = None
     output_dir: Optional[str] = field(
         default=None,
-        metadata={"help": "Directory to save checkpoints and logs"},
+        metadata={"help": "Directory to save checkpoints"},
     )
 
 @dataclass
@@ -101,6 +113,60 @@ class PretrainConfig:
             raise ValueError("keep_last_n_checkpoints must be a positive integer.")
         if self.training.patience < -1:
             raise ValueError("patience must be -1 or non-negative.")
+        
+def apply_unimolv2_model_defaults(cfg: DictConfig) -> None:
+    """Populate UniMolV2 architecture defaults based on ``model_size``.
+
+    Args:
+        cfg: The model section of the pretraining configuration.
+    """
+    if str(getattr(cfg, "model_name", "")).lower() != "unimolv2":
+        return
+
+    size = str(getattr(cfg, "model_size", "84m")).lower()
+    arch = {
+        "84m": {
+            "encoder_layers": 12,
+            "encoder_embed_dim": 768,
+            "encoder_ffn_embed_dim": 768,
+            "encoder_attention_heads": 48,
+        },
+        "164m": {
+            "encoder_layers": 24,
+            "encoder_embed_dim": 768,
+            "encoder_ffn_embed_dim": 768,
+            "encoder_attention_heads": 48,
+        },
+        "310m": {
+            "encoder_layers": 32,
+            "encoder_embed_dim": 1024,
+            "encoder_ffn_embed_dim": 1024,
+            "encoder_attention_heads": 64,
+        },
+        "570m": {
+            "encoder_layers": 32,
+            "encoder_embed_dim": 1536,
+            "encoder_ffn_embed_dim": 1536,
+            "encoder_attention_heads": 96,
+        },
+        "1.1b": {
+            "encoder_layers": 64,
+            "encoder_embed_dim": 1536,
+            "encoder_ffn_embed_dim": 1536,
+            "encoder_attention_heads": 96,
+        },
+    }
+    params = arch.get(size)
+    if params is None:
+        raise ValueError(f"Unsupported UniMol2 model_size: {cfg.model_size}")
+
+    for k, v in params.items():
+        setattr(cfg, k, v)
+
+    cfg.pair_embed_dim = 512
+    cfg.pair_hidden_dim = 64
+    cfg.pair_dropout = 0.25
+
 
 cs = ConfigStore.instance()
 cs.store(name="pretrain_config", node=PretrainConfig)

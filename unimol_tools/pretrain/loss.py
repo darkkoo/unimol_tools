@@ -5,30 +5,21 @@ import torch.nn.functional as F
 from .metrics import metrics
 
 
-class UniMolLoss(nn.Module):
-    """Pretraining loss for Uni-Mol model.
-
-    This implementation mirrors the original Uni-Mol loss which combines
-    token, coordinate and distance objectives together with several
-    regularization terms.
-    """
+class PretrainLoss(nn.Module):
+    """Common pretraining loss components shared by UniMol variants."""
 
     def __init__(
         self,
-        dictionary,
+        padding_idx,
         masked_token_loss=1,
         masked_coord_loss=5,
         masked_dist_loss=10,
-        x_norm_loss=0.01,
-        delta_pair_repr_norm_loss=0.01,
     ):
         super().__init__()
-        self.padding_idx = dictionary.pad()
+        self.padding_idx = padding_idx
         self.masked_token_loss = masked_token_loss
         self.masked_coord_loss = masked_coord_loss
         self.masked_dist_loss = masked_dist_loss
-        self.x_norm_loss = x_norm_loss
-        self.delta_pair_repr_norm_loss = delta_pair_repr_norm_loss
         # statistics used for distance normalization
         self.dist_mean = 6.312581655060595
         self.dist_std = 3.3899264663911888
@@ -38,28 +29,30 @@ class UniMolLoss(nn.Module):
         tgt_coordinates = net_target["tgt_coordinates"]
         tgt_distance = net_target["tgt_distance"]
         masked_tokens = tgt_tokens.ne(self.padding_idx)
+        masked_cnt = masked_tokens.long().sum()
 
         (
             logits_encoder,
             encoder_distance,
             encoder_coord,
-            x_norm,
-            delta_encoder_pair_rep_norm,
+            extra1,
+            extra2,
         ) = model(**net_input, encoder_masked_tokens=masked_tokens)
 
-        target = tgt_tokens
-        if masked_tokens is not None:
-            target = target[masked_tokens]
-
-        masked_token_loss = F.nll_loss(
-            F.log_softmax(logits_encoder, dim=-1, dtype=torch.float32),
-            target,
-            ignore_index=self.padding_idx,
-            reduction="mean",
-        )
-        masked_pred = logits_encoder.argmax(dim=-1)
-        masked_hit = (masked_pred == target).long().sum()
-        masked_cnt = masked_tokens.long().sum()
+        if masked_cnt > 0:
+            target = tgt_tokens[masked_tokens]
+            masked_token_loss = F.nll_loss(
+                F.log_softmax(logits_encoder, dim=-1, dtype=torch.float32),
+                target,
+                ignore_index=self.padding_idx,
+                reduction="mean",
+            )
+            masked_pred = logits_encoder.argmax(dim=-1)
+            masked_hit = (masked_pred == target).long().sum()
+        else:
+            param = next(model.parameters())
+            masked_token_loss = param.view(-1)[0] * 0.0
+            masked_hit = logits_encoder.new_zeros((), dtype=torch.long)
 
         loss = masked_token_loss * self.masked_token_loss
 
@@ -72,7 +65,7 @@ class UniMolLoss(nn.Module):
             "masked_token_cnt": masked_cnt,
         }
 
-        if encoder_coord is not None:
+        if encoder_coord is not None and masked_cnt > 0:
             coord_target = tgt_coordinates
             masked_coord_loss = F.smooth_l1_loss(
                 encoder_coord[masked_tokens].view(-1, 3).float(),
@@ -83,7 +76,7 @@ class UniMolLoss(nn.Module):
             loss = loss + masked_coord_loss * self.masked_coord_loss
             logging_output["masked_coord_loss"] = masked_coord_loss.data
 
-        if encoder_distance is not None:
+        if encoder_distance is not None and masked_cnt > 0:
             masked_dist_loss = self.cal_dist_loss(
                 encoder_distance,
                 tgt_distance,
@@ -94,23 +87,7 @@ class UniMolLoss(nn.Module):
             loss = loss + masked_dist_loss * self.masked_dist_loss
             logging_output["masked_dist_loss"] = masked_dist_loss.data
 
-        if self.x_norm_loss > 0 and x_norm is not None:
-            loss = loss + self.x_norm_loss * x_norm
-            logging_output["x_norm_loss"] = x_norm.data
-
-        if (
-            self.delta_pair_repr_norm_loss > 0
-            and delta_encoder_pair_rep_norm is not None
-        ):
-            loss = (
-                loss + self.delta_pair_repr_norm_loss * delta_encoder_pair_rep_norm
-            )
-            logging_output[
-                "delta_pair_repr_norm_loss"
-            ] = delta_encoder_pair_rep_norm.data
-
-        logging_output["loss"] = loss.data
-        return loss, logging_output
+        return loss, logging_output, {"x_norm": extra1, "delta_pair_repr_norm": extra2}
 
     def cal_dist_loss(
         self,
@@ -204,6 +181,56 @@ class UniMolLoss(nn.Module):
                 sample_size,
                 round=3,
             )
+        return result
+
+class UniMolLoss(PretrainLoss):
+    """Pretraining loss for the original UniMol model.
+
+    Extends :class:`PretrainLoss` with additional regularization terms used
+    only by UniMol.
+    """
+
+    def __init__(
+        self,
+        padding_idx,
+        masked_token_loss=1,
+        masked_coord_loss=5,
+        masked_dist_loss=10,
+        x_norm_loss=0.01,
+        delta_pair_repr_norm_loss=0.01,
+    ):
+        super().__init__(
+            padding_idx,
+            masked_token_loss=masked_token_loss,
+            masked_coord_loss=masked_coord_loss,
+            masked_dist_loss=masked_dist_loss,
+        )
+        self.x_norm_loss = x_norm_loss
+        self.delta_pair_repr_norm_loss = delta_pair_repr_norm_loss
+
+    def forward(self, model, net_input, net_target):
+        loss, logging_output, extras = super().forward(model, net_input, net_target)
+        x_norm = extras.get("x_norm")
+        delta_pair_repr_norm = extras.get("delta_pair_repr_norm")
+
+        if self.x_norm_loss > 0 and x_norm is not None:
+            loss = loss + self.x_norm_loss * x_norm
+            logging_output["x_norm_loss"] = x_norm.data
+
+        if (
+            self.delta_pair_repr_norm_loss > 0
+            and delta_pair_repr_norm is not None
+        ):
+            loss = loss + self.delta_pair_repr_norm_loss * delta_pair_repr_norm
+            logging_output["delta_pair_repr_norm_loss"] = delta_pair_repr_norm.data
+
+        logging_output["loss"] = loss.data
+        return loss, logging_output
+
+    @staticmethod
+    def reduce_metrics(logging_outputs, split="train"):
+        result = PretrainLoss.reduce_metrics(logging_outputs, split)
+        sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
 
         x_norm_loss = sum(log.get("x_norm_loss", 0) for log in logging_outputs)
         if x_norm_loss > 0 and sample_size > 0:
@@ -227,3 +254,12 @@ class UniMolLoss(nn.Module):
             )
 
         return result
+
+
+class UniMolV2Loss(PretrainLoss):
+    """Loss function for UniMol2 pretraining."""
+
+    def forward(self, model, net_input, net_target):
+        loss, logging_output, _ = super().forward(model, net_input, net_target)
+        logging_output["loss"] = loss.data
+        return loss, logging_output

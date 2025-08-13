@@ -288,17 +288,8 @@ class UniMolPretrainTrainer:
     def decorate_batch(self, batch):
         # batch is a dict of tensors (batch_size, ...)
         device = torch.device(f"cuda:{self.local_rank}" if torch.cuda.is_available() else "cpu")
-        net_input = {
-            'src_tokens': batch['net_input']['src_tokens'].to(device),
-            'src_coord': batch['net_input']['src_coord'].to(device),
-            'src_distance': batch['net_input']['src_distance'].to(device),
-            'src_edge_type': batch['net_input']['src_edge_type'].to(device),
-        }
-        net_target = {
-            'tgt_tokens': batch['net_target']['tgt_tokens'].to(device),
-            'tgt_coordinates': batch['net_target']['tgt_coordinates'].to(device),
-            'tgt_distance': batch['net_target']['tgt_distance'].to(device),
-        }
+        net_input = {k: v.to(device) for k, v in batch['net_input'].items()}
+        net_target = {k: v.to(device) for k, v in batch['net_target'].items()}
         return net_input, net_target
 
     def reduce_metrics(
