@@ -37,6 +37,7 @@ class MolPretrain:
         train_lmdb = ds_cfg.train_path
         val_lmdb = ds_cfg.valid_path
 
+        model_name = self.config.model.model_name.lower()
         self.dist_mean = None
         self.dist_std = None
         if ds_cfg.data_type != "lmdb" and not ds_cfg.train_path.endswith(".lmdb"):
@@ -77,10 +78,9 @@ class MolPretrain:
                     f"Validation dataset preprocessing finished, LMDB saved at {val_lmdb}"
                 )
         else:
-            if train_lmdb:
+            if train_lmdb and model_name == "unimolv1":
                 self.dist_mean, self.dist_std = compute_lmdb_dist_stats(train_lmdb)
 
-        model_name = self.config.model.model_name.lower()
         if model_name == "unimolv2":
             logger.info(f"Loading LMDB dataset from {train_lmdb}")
             lmdb_dataset = LMDBDataset(train_lmdb)
