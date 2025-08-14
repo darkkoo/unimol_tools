@@ -18,6 +18,7 @@ from unimol_tools.pretrain import (
     UniMolV2Loss,
     build_dictionary,
     preprocess_dataset,
+    compute_lmdb_dist_stats,
 )
 from unimol_tools.pretrain.pretrain_config import apply_unimolv2_model_defaults
 
@@ -35,12 +36,16 @@ class MolPretrain:
         ds_cfg = self.config.dataset
         train_lmdb = ds_cfg.train_path
         val_lmdb = ds_cfg.valid_path
+
+        self.dist_mean = None
+        self.dist_std = None
         if ds_cfg.data_type != "lmdb" and not ds_cfg.train_path.endswith(".lmdb"):
             lmdb_path = os.path.splitext(ds_cfg.train_path)[0] + ".lmdb"
+
             logger.info(
                 f"Preprocessing training data from {ds_cfg.train_path} to {lmdb_path}"
             )
-            preprocess_dataset(
+            lmdb_path, self.dist_mean, self.dist_std = preprocess_dataset(
                 ds_cfg.train_path,
                 lmdb_path,
                 data_type=ds_cfg.data_type,
@@ -71,6 +76,9 @@ class MolPretrain:
                 logger.info(
                     f"Validation dataset preprocessing finished, LMDB saved at {val_lmdb}"
                 )
+        else:
+            if train_lmdb:
+                self.dist_mean, self.dist_std = compute_lmdb_dist_stats(train_lmdb)
 
         model_name = self.config.model.model_name.lower()
         if model_name == "unimolv2":
@@ -169,6 +177,8 @@ class MolPretrain:
                 masked_dist_loss=self.config.model.masked_dist_loss,
                 x_norm_loss=self.config.model.x_norm_loss,
                 delta_pair_repr_norm_loss=self.config.model.delta_pair_repr_norm_loss,
+                dist_mean=self.dist_mean,
+                dist_std=self.dist_std,
             )
         trainer = UniMolPretrainTrainer(
             model,
