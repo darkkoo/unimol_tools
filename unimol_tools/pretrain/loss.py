@@ -14,8 +14,6 @@ class PretrainLoss(nn.Module):
         masked_token_loss=1,
         masked_coord_loss=5,
         masked_dist_loss=10,
-        x_norm_loss=0.01,
-        delta_pair_repr_norm_loss=0.01,
         dist_mean=6.312581655060595,
         dist_std=3.3899264663911888,
     ):
@@ -202,12 +200,16 @@ class UniMolLoss(PretrainLoss):
         masked_dist_loss=10,
         x_norm_loss=0.01,
         delta_pair_repr_norm_loss=0.01,
+        dist_mean=6.312581655060595,
+        dist_std=3.3899264663911888,
     ):
         super().__init__(
             padding_idx,
             masked_token_loss=masked_token_loss,
             masked_coord_loss=masked_coord_loss,
             masked_dist_loss=masked_dist_loss,
+            dist_mean=dist_mean,
+            dist_std=dist_std,
         )
         self.x_norm_loss = x_norm_loss
         self.delta_pair_repr_norm_loss = delta_pair_repr_norm_loss
